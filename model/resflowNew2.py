@@ -12,7 +12,6 @@ from mod import OpticalFlowEstimatorNoDenseConnection, OpticalFlowEstimator, Fea
 from consensus_network_modules import MutualMatching, NeighConsensus, FeatureCorrelation
 
 import correlation # the custom cost volume layer
-from torchsummary import summary
 __all__ = ['Res2Net', 'res2net50']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -439,12 +438,3 @@ def res2net50(pretrained=False, **kwargs):
     return model
 
 
-
-if __name__ == '__main__':
-    images = torch.rand(1, 1, 128, 128)
-    source = torch.rand(1, 1, 128, 128)
-    model = res2net50()
-    modelR=model.to(device)
-    print(summary(modelR,[(1,128,128),(1,128,128)]))
-    # model = model.cuda(0)
-    # print(model(images,source).size())
