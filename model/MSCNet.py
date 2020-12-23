@@ -5,24 +5,14 @@ import torch.utils.model_zoo as model_zoo
 import torch
 import torch.nn.functional as F
 import numpy as np
-# from splat import SplAtConv2d
 from mod import CMDTop
 from mod import OpticalFlowEstimatorNoDenseConnection, OpticalFlowEstimator, FeatureL2Norm, \
     CorrelationVolume, deconv, conv, predict_flow, unnormalise_and_convert_mapping_to_flow, warp
 from consensus_network_modules import MutualMatching, NeighConsensus, FeatureCorrelation
 
 import correlation # the custom cost volume layer
-__all__ = ['Res2Net', 'res2net50']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_urls = {
-    'res2net50_26w_4s': 'https://shanghuagao.oss-cn-beijing.aliyuncs.com/res2net/res2net50_26w_4s-06e79181.pth',
-    'res2net50_48w_2s': 'https://shanghuagao.oss-cn-beijing.aliyuncs.com/res2net/res2net50_48w_2s-afed724a.pth',
-    'res2net50_14w_8s': 'https://shanghuagao.oss-cn-beijing.aliyuncs.com/res2net/res2net50_14w_8s-6527dddc.pth',
-    'res2net50_26w_6s': 'https://shanghuagao.oss-cn-beijing.aliyuncs.com/res2net/res2net50_26w_6s-19041792.pth',
-    'res2net50_26w_8s': 'https://shanghuagao.oss-cn-beijing.aliyuncs.com/res2net/res2net50_26w_8s-2c7c9f12.pth',
-    'res2net101_26w_4s': 'https://shanghuagao.oss-cn-beijing.aliyuncs.com/res2net/res2net101_26w_4s-02a759a1.pth',
-}
 
 def deconv(in_planes, out_planes, kernel_size=4, stride=2, padding=1):
     return nn.ConvTranspose2d(in_planes, out_planes, kernel_size, stride, padding, bias=True)
@@ -89,9 +79,8 @@ class DeConvBlock(nn.Module):
         # out = self.sa(out)*out
         return out
 
-#CBAM 结构代码
-#通道注意力模块
-
+#extract from CBAM 
+#channel module
 class ChannelAttention(nn.Module):
     def __init__(self, in_planes, ratio=16):
         super(ChannelAttention, self).__init__()
@@ -109,8 +98,7 @@ class ChannelAttention(nn.Module):
         return self.sigmoid(out)
         # return out
 
-#空间注意力模块
-
+#spatial module
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
         super(SpatialAttention, self).__init__()
@@ -163,14 +151,6 @@ class Bottle2neck(nn.Module):
           bns.append(nn.BatchNorm2d(width))
         self.convs = nn.ModuleList(convs)
         self.bns = nn.ModuleList(bns)
-        # self.conv2 = SplAtConv2d(
-        #         width, width, kernel_size=3,
-        #         stride=stride, padding=dilation,
-        #         dilation=dilation, groups=cardinality, bias=False,
-        #         radix=radix, rectify=rectified_conv,
-        #         rectify_avg=rectify_avg,
-        #         norm_layer=norm_layer,
-        #         dropblock_prob=dropblock_prob)
 
         self.conv3 = nn.Conv2d(width*scale, planes * self.expansion, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(planes * self.expansion)
@@ -218,11 +198,11 @@ class Bottle2neck(nn.Module):
 
         return out
 
-class Res2Net(nn.Module):
+class MSCNet(nn.Module):
 
     def __init__(self, block, layers, baseWidth = 26, scale = 4, num_classes=1000):
         self.inplanes = 64
-        super(Res2Net, self).__init__()
+        super(MSCNet, self).__init__()
         self.baseWidth = baseWidth
         self.scale = scale
         self.cyclic_consistency=True
@@ -246,21 +226,16 @@ class Res2Net(nn.Module):
         self.layer3 = self._make_layer(block, 128, 64, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 256, 64,layers[3], stride=2)
         self.layer5 = self.make_layer_deconv(768, 256, stride=2)
-        # self.layer5 = self._make_layer(block, 1024, 128, layers[3], stride=1)
         self.layer6 = self.make_layer_deconv(512, 128, stride=2)
         self.layer7 = self.make_layer_deconv1(block, 256, 64, layers[4], stride=2)
         self.layer8 = self.make_layer_deconv1(block, 128, 32, layers[5], stride=2)
-        # self.layer7 = self._make_layer(block, 512, 64, layers[4], stride=1)
-        # self.layer9 = self.make_layer_deconv1(block, 128, 64, layers[4], stride=2)
-        # self.layer9 = self._make_layer(block, 32, 16, layers[6], stride=1)
+
         self.conv2=Conv2(in_planes = 32 ,places=256)
 
         self.l_dc_conv1 = dilateconv(256, 256, kernel_size=3, stride=1, padding=1,  dilation=1, batch_norm=True)
         self.l_dc_conv2 = dilateconv(256, 256, kernel_size=3, stride=1, padding=2,  dilation=2, batch_norm=True)
         self.l_dc_conv3 = dilateconv(256, 256, kernel_size=3, stride=1, padding=4,  dilation=4, batch_norm=True)
-        # self.l_dc_conv4 = dilateconv(256, 256, kernel_size=3, stride=1, padding=8,  dilation=8, batch_norm=True)
 
-        # self.l_dc_conv1 = dilateconv(128, 128, kernel_size=3, stride=1, padding=1,  dilation=1, batch_norm=True)
         self.l_dc_conv11 = dilateconv(128, 128, kernel_size=3, stride=1, padding=2,  dilation=2, batch_norm=True)
         self.l_dc_conv22 = dilateconv(128, 128, kernel_size=3, stride=1, padding=4,  dilation=4, batch_norm=True)
         self.l_dc_conv33 = dilateconv(128, 128, kernel_size=3, stride=1, padding=8,  dilation=8, batch_norm=True)
@@ -282,8 +257,6 @@ class Res2Net(nn.Module):
             self.NeighConsensus = NeighConsensus(use_cuda=True,
                                                  kernel_sizes=ncons_kernel_sizes,
                                                  channels=ncons_channels)
-        # self.avgpool = nn.AdaptiveAvgPool2d(1)
-        # self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -313,9 +286,6 @@ class Res2Net(nn.Module):
     def make_layer_deconv(self, in_places, places, stride):
         layers = []
         layers.append(DeConvBlock(in_places, places,stride, downsampling =True))
-        # for i in range(1, block):
-        #     layers.append(Bottleneck(places, places//4))
-
         return nn.Sequential(*layers)
 
     def make_layer_deconv1(self, block, in_places, places, blocks, stride):
@@ -329,9 +299,6 @@ class Res2Net(nn.Module):
         return nn.Sequential(*layers)
 
     def coarsest_resolution_flow(self, c14, c24):
-        # ratio_x = 16.0 / float(w_256)
-        # ratio_y = 16.0 / float(h_256)
-        # print(c14.shape,c24.shape)
         b = c24.shape[0]
         if self.cyclic_consistency:
             corr4d = self.corr(self.l2norm(c24), self.l2norm(c14))  # first source, then target
@@ -362,18 +329,13 @@ class Res2Net(nn.Module):
     def forward(self, input1,input2):
         o11=self.forward_once(input1)
         o21=self.forward_once(input2)
-        # print(o11.shape)
-        # exit()
+
         o12=self.layer2(o11)
         o22=self.layer2(o21)
-        # print(o12.shape)
         o13=self.layer3(o12)
         o23=self.layer3(o22)
-
         o14=self.layer4(o13)
-        o24=self.layer4(o23)
-        # print(o23.shape)
-        
+        o24=self.layer4(o23)        
 
         flow1 = self.coarsest_resolution_flow(o11, o21)
         flow2 = self.coarsest_resolution_flow(o12, o22)
@@ -384,20 +346,14 @@ class Res2Net(nn.Module):
         flow2 = self.convflow2(flow2)
         flow3 = self.convflow3(flow3)
         flow4 = self.convflow4(flow4)
-        # print(flow1.shape)
-        # print(flow2.shape)
-        # print(flow3.shape)
-        # print(flow4.shape)
 
         out = torch.cat((o14,o24,flow4),dim=1)
         out = self.layer5(out)      
         out = self.l_dc_conv1(out)
         out = self.l_dc_conv2(out)
         out = self.l_dc_conv3(out)
-        # out = self.l_dc_conv4(out)
 
         out = torch.cat((out,flow3),dim=1)
-        # print(out.shape)
         out = self.layer6(out)
         out = self.l_dc_conv11(out)
         out = self.l_dc_conv22(out)
@@ -405,7 +361,6 @@ class Res2Net(nn.Module):
 
 
         out = torch.cat((out,flow2),dim=1)
-        # print(out.shape)
         out = self.ca0(out)*out
         out = self.sa0(out)*out
         out = self.layer7(out)
@@ -416,12 +371,6 @@ class Res2Net(nn.Module):
         out = self.sa1(out)*out
 
         out = self.conv2(out)
-        # print(out.shape)
-        # exit()
-        # out = self.layer4(out)
-        # print(out.shape,flow3.shape)
-        # out = torch.cat((out,flow3),dim=1)
-        # print(out.shape)
 
         return out
 
